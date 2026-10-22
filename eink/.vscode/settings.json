@@ -1,0 +1,38 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.extensionActivationMode": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "cmake.automaticReconfigure": false,
+  "cmake.autoSelectActiveFolder": false,
+  "cmake.options.advanced": {
+    "build": {
+      "statusBarVisibility": "inherit",
+      "inheritDefault": "hidden"
+    },
+    "launch": {
+      "statusBarVisibility": "inherit",
+      "inheritDefault": "hidden"
+    },
+    "debug": {
+      "statusBarVisibility": "inherit",
+      "inheritDefault": "hidden"
+    }
+  },
+  "clangd.path": "/Users/cd022/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/Users/cd022/HBWuChang/code/eink/eink/build"
+  ],
+  "idf.currentSetup": "/Users/cd022/.espressif/v6.0.2/esp-idf",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "OPENOCD_USB_ADAPTER_LOCATION": "2-1.2",
+    "IDF_TARGET": "esp32s3"
+  },
+  "idf.flashType": "UART",
+  "idf.port": "/dev/tty.usbmodem21201"
+}
