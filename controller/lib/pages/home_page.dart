@@ -64,20 +64,6 @@ class ImageEditorPanel extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.image_outlined),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      image.fileName.value,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Text('旋转 ${image.rotation.value}°'),
-                ],
-              ),
               const SizedBox(height: 12),
               const Expanded(child: CropEditor()),
               const SizedBox(height: 12),
@@ -121,6 +107,23 @@ class ImageEditorPanel extends StatelessWidget {
                     icon: const Icon(Icons.crop_free),
                     label: const Text('重置裁剪'),
                   ),
+                  Row(
+                    mainAxisSize: .min,
+                    children: [
+                      const Icon(Icons.image_outlined),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: FittedBox(
+                          fit: .scaleDown,
+                          child: Text(
+                            image.fileName.value,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text('旋转 ${image.rotation.value}°'),
                 ],
               ),
               const SizedBox(height: 8),
@@ -264,7 +267,7 @@ class _BlankColorDialogState extends State<_BlankColorDialog> {
     _b = widget.initial.b * 255;
   }
 
-  Color get _color => Color.fromARGB(_r.round(), _g.round(), _b.round(), 255);
+  Color get _color => Color.fromARGB(255, _r.round(), _g.round(), _b.round());
 
   void _apply(Color color) {
     setState(() {
@@ -580,6 +583,7 @@ class BlePanel extends StatelessWidget {
                           final ts = DateTime.fromMillisecondsSinceEpoch(
                             (r['timestamp'] as num?)?.toInt() ?? 0,
                           );
+                          final restorable = history.hasSource(r);
                           return ListTile(
                             dense: true,
                             contentPadding: EdgeInsets.zero,
@@ -592,8 +596,36 @@ class BlePanel extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             subtitle: Text(
-                              '${_time(ts)} · ${(((r['durationMs'] as num?) ?? 0) / 1000).toStringAsFixed(1)} s',
+                              '${_time(ts)} · ${(((r['durationMs'] as num?) ?? 0) / 1000).toStringAsFixed(1)} s'
+                              '${restorable ? '' : ' · 源图已丢失'}',
                             ),
+                            trailing: Tooltip(
+                              message: restorable ? '载入此图片替换当前图片' : '历史记录未保存源图',
+                              child: Icon(
+                                restorable
+                                    ? Icons.restore
+                                    : Icons.image_not_supported_outlined,
+                                size: 18,
+                              ),
+                            ),
+                            onTap: restorable
+                                ? () async {
+                                    try {
+                                      final bytes = await history.readSource(r);
+                                      if (bytes == null) {
+                                        image.error.value = '历史图片已丢失';
+                                        return;
+                                      }
+                                      await image.loadSource(
+                                        bytes,
+                                        (r['fileName'] as String?) ?? '历史图片',
+                                        path: r['sourcePath'] as String?,
+                                      );
+                                    } catch (e) {
+                                      image.error.value = '载入历史图片失败：$e';
+                                    }
+                                  }
+                                : null,
                           );
                         },
                       ),

@@ -45,6 +45,31 @@ void main() {
     expect(corner.b, 0);
   });
 
+  test('blank color keeps RGB channel order', () {
+    final source = createTestPatternPng();
+    (int, int, int) padCorner(int blankColor) {
+      final result = renderImageSync(
+        sourceBytes: source,
+        rotation: 0,
+        cropLeft: -1,
+        cropTop: -1,
+        cropRight: 2,
+        cropBottom: 2,
+        cropAngle: 0,
+        blankColor: blankColor,
+        dither: false,
+      );
+      final corner = img.decodePng(result.previewPng)!.getPixel(0, 0);
+      return (corner.r.toInt(), corner.g.toInt(), corner.b.toInt());
+    }
+
+    // Pure red, green and blue after four-colour quantisation. If G/B were
+    // swapped, green would become black and blue would become yellow.
+    expect(padCorner(0xFF0000), (200, 0, 0));
+    expect(padCorner(0x00FF00), (245, 205, 0));
+    expect(padCorner(0x0000FF), (0, 0, 0));
+  });
+
   test('portrait crop rotated by 90 fills the landscape target', () {
     final source = createTestPatternPng();
     final result = renderImageSync(

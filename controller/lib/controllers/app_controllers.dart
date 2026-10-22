@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -55,30 +56,51 @@ class HistoryController extends GetxController {
     records.assignAll(list);
   }
 
-  void add({
+  Future<void> add({
     required String fileName,
     required int bytes,
     required int durationMs,
     required String deviceName,
-  }) {
-    _box.add({
+    String? sourcePath,
+  }) async {
+    await _box.add({
       'timestamp': DateTime.now().millisecondsSinceEpoch,
       'fileName': fileName,
       'bytes': bytes,
       'durationMs': durationMs,
       'deviceName': deviceName,
+      'sourcePath': sourcePath,
     });
     reload();
   }
 
-  void clear() {
-    _box.clear();
+  /// Whether the originally selected file of [record] is still readable.
+  bool hasSource(Map<String, dynamic> record) {
+    final path = record['sourcePath'];
+    return path is String && path.isNotEmpty && File(path).existsSync();
+  }
+
+  Future<Uint8List?> readSource(Map<String, dynamic> record) async {
+    final path = record['sourcePath'];
+    if (path is! String || path.isEmpty) return null;
+    final file = File(path);
+    if (!await file.exists()) return null;
+    return file.readAsBytes();
+  }
+
+  Future<void> clear() async {
+    await _box.clear();
     records.clear();
   }
 }
 
 class ImageController extends GetxController {
+  static const _keyDither = 'editor.dither';
+  static const _keyCropAngle = 'editor.cropAngle';
+  static const _keyBlankColor = 'editor.blankColor';
+
   final originalBytes = Rxn<Uint8List>();
+  final sourcePath = Rxn<String>();
   final previewPng = Rxn<Uint8List>();
   final packed = Rxn<Uint8List>();
   final fileName = '未选择图片'.obs;
@@ -103,6 +125,27 @@ class ImageController extends GetxController {
   bool get hasImage => originalBytes.value != null;
   bool get hasResult => packed.value != null;
 
+  Box<dynamic>? get _settingsBox =>
+      Hive.isBoxOpen('settings') ? Hive.box<dynamic>('settings') : null;
+
+  @override
+  void onInit() {
+    super.onInit();
+    final box = _settingsBox;
+    if (box == null) return;
+
+    final savedDither = box.get(_keyDither);
+    if (savedDither is bool) dither.value = savedDither;
+
+    final savedAngle = box.get(_keyCropAngle);
+    if (savedAngle is int && cropAngles.contains(savedAngle)) {
+      cropAngle.value = savedAngle;
+    }
+
+    final savedColor = box.get(_keyBlankColor);
+    if (savedColor is int) blankColor.value = Color(savedColor);
+  }
+
   /// Aspect ratio of the fixed crop frame for the current [cropAngle].
   double get cropAspectRatio =>
       cropAngle.value % 180 == 0
@@ -121,7 +164,7 @@ class ImageController extends GetxController {
       if (file == null) return;
 
       final bytes = await file.readAsBytes();
-      await _loadSource(bytes, file.name);
+      await loadSource(bytes, file.name, path: file.path);
     } catch (e) {
       error.value = '读取图片失败：$e';
     }
@@ -129,14 +172,15 @@ class ImageController extends GetxController {
 
   Future<void> loadTestPattern() async {
     try {
-      await _loadSource(createTestPatternPng(), '四色测试图');
+      await loadSource(createTestPatternPng(), '四色测试图');
     } catch (e) {
       error.value = '读取测试图失败：$e';
     }
   }
 
-  Future<void> _loadSource(Uint8List bytes, String name) async {
+  Future<void> loadSource(Uint8List bytes, String name, {String? path}) async {
     originalBytes.value = bytes;
+    sourcePath.value = path;
     fileName.value = name;
     rotation.value = 0;
     cropRect.value = const Rect.fromLTRB(0, 0, 1, 1);
@@ -182,6 +226,7 @@ class ImageController extends GetxController {
     final normalized = ((angle % 360) + 360) % 360;
     if (normalized == cropAngle.value) return;
     cropAngle.value = normalized;
+    _settingsBox?.put(_keyCropAngle, normalized);
     // The editor resets the view for the new frame ratio and pushes the rect.
     viewResetToken.value++;
   }
@@ -211,11 +256,14 @@ class ImageController extends GetxController {
   void setBlankColor(Color value) {
     if (blankColor.value == value) return;
     blankColor.value = value;
+    _settingsBox?.put(_keyBlankColor, value.toARGB32());
     _scheduleRender();
   }
 
   void setDither(bool value) {
+    if (dither.value == value) return;
     dither.value = value;
+    _settingsBox?.put(_keyDither, value);
     render();
   }
 
@@ -470,6 +518,9 @@ class BleController extends GetxController {
     status.value = EpdStatus.idle;
     message.value = '准备发送…';
 
+    // Capture the source now: the user may load another image while the BLE
+    // transfer is in progress.
+    final historySourcePath = Get.find<ImageController>().sourcePath.value;
     final started = DateTime.now();
     try {
       final negotiatedMtu = await _waitMtu(d);
@@ -558,12 +609,17 @@ class BleController extends GetxController {
       }
 
       final elapsed = DateTime.now().difference(started).inMilliseconds;
-      Get.find<HistoryController>().add(
-        fileName: sourceName,
-        bytes: image.length,
-        durationMs: elapsed,
-        deviceName: device.value?.platformName ?? 'HUAWEI-EPD-A0',
-      );
+      try {
+        await Get.find<HistoryController>().add(
+          fileName: sourceName,
+          bytes: image.length,
+          durationMs: elapsed,
+          deviceName: device.value?.platformName ?? 'HUAWEI-EPD-A0',
+          sourcePath: historySourcePath,
+        );
+      } catch (_) {
+        // The image is already on screen; never fail the send over history.
+      }
 
       progress.value = 1;
       status.value = result;
