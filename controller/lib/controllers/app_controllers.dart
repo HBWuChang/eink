@@ -391,13 +391,18 @@ class BleController extends GetxController {
   }
 
   Future<void> scan() async {
-    if (adapterState.value != BluetoothAdapterState.on) {
+    if (!Platform.isAndroid &&
+        adapterState.value != BluetoothAdapterState.on) {
       message.value = '请先打开系统蓝牙';
       return;
     }
     scanResults.clear();
     message.value = '正在扫描 ${BleProtocol.deviceName}…';
     try {
+      if (Platform.isAndroid) {
+        // turnOn requests CONNECT permission before checking the adapter.
+        await FlutterBluePlus.turnOn();
+      }
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 10),
       );

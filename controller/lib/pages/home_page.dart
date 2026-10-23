@@ -11,8 +11,23 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: LayoutBuilder(
+      body: SafeArea(
+        child: LayoutBuilder(
         builder: (context, constraints) {
+          if (constraints.maxHeight > constraints.maxWidth) {
+            return SingleChildScrollView(
+              key: const ValueKey('portrait-scroll'),
+              padding: const EdgeInsets.all(16),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ImageEditorPanel(squarePreview: true),
+                  SizedBox(height: 16),
+                  BlePanel(scrollable: true),
+                ],
+              ),
+            );
+          }
           final wide = constraints.maxWidth >= 1000;
           final editor = const Expanded(
             flex: 3,
@@ -28,7 +43,7 @@ class HomePage extends StatelessWidget {
               child: BlePanel(),
             ),
           );
-          return Row(
+          final content = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: wide
                 ? [editor, side]
@@ -43,14 +58,23 @@ class HomePage extends StatelessWidget {
                     ),
                   ],
           );
+          if (constraints.maxHeight < 700) {
+            return SingleChildScrollView(
+              child: SizedBox(height: 700, child: content),
+            );
+          }
+          return content;
         },
+        ),
       ),
     );
   }
 }
 
 class ImageEditorPanel extends StatelessWidget {
-  const ImageEditorPanel({super.key});
+  const ImageEditorPanel({super.key, this.squarePreview = false});
+
+  final bool squarePreview;
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +89,10 @@ class ImageEditorPanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 12),
-              const Expanded(child: CropEditor()),
+              if (squarePreview)
+                const AspectRatio(aspectRatio: 1, child: CropEditor())
+              else
+                const Expanded(child: CropEditor()),
               const SizedBox(height: 12),
               if (image.error.value.isNotEmpty)
                 Padding(
@@ -234,12 +261,12 @@ class _BlankColorRow extends StatelessWidget {
         const SizedBox(width: 8),
         Text('#$hex', style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(width: 8),
-        Text(
+        Flexible(child: Text(
           '超出图像的部分',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: Theme.of(context).disabledColor,
           ),
-        ),
+        )),
       ],
     );
   }
@@ -372,7 +399,12 @@ class _BlankColorDialogState extends State<_BlankColorDialog> {
 }
 
 class BlePanel extends StatelessWidget {
-  const BlePanel({super.key});
+  const BlePanel({super.key, this.scrollable = false});
+
+  final bool scrollable;
+
+  Widget _historyArea(Widget child) =>
+      scrollable ? child : Expanded(child: child);
 
   @override
   Widget build(BuildContext context) {
@@ -415,6 +447,8 @@ class BlePanel extends StatelessWidget {
                 '${ble.adapterLabel} · ${ble.scanResults.length} 个结果',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (!ble.connected.value && ble.message.value.isNotEmpty)
+                Text(ble.message.value),
               const SizedBox(height: 8),
               if (!ble.connected.value) ...[
                 SizedBox(
@@ -548,7 +582,7 @@ class BlePanel extends StatelessWidget {
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
                     child: Text(
-                      '先在左侧选择图片并生成预览。',
+                      '请先选择图片并生成预览。',
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
@@ -571,12 +605,15 @@ class BlePanel extends StatelessWidget {
                   ),
                 ],
               ),
-              Expanded(
-                child: history.records.isEmpty
-                    ? const Center(
-                        child: Text('暂无历史', style: TextStyle(fontSize: 12)),
+              _historyArea(
+                history.records.isEmpty
+                    ? const SizedBox(
+                        height: 64,
+                        child: Center(child: Text('暂无历史', style: TextStyle(fontSize: 12))),
                       )
                     : ListView.builder(
+                        shrinkWrap: scrollable,
+                        physics: scrollable ? const NeverScrollableScrollPhysics() : null,
                         itemCount: history.records.length,
                         itemBuilder: (context, index) {
                           final r = history.records[index];
