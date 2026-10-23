@@ -4,6 +4,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import 'controllers/app_controllers.dart';
 import 'pages/home_page.dart';
+import 'pages/yt_status_page.dart';
+import 'controllers/yt_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +18,7 @@ Future<void> main() async {
   Get.put(HistoryController());
   Get.put(ImageController());
   Get.put(BleController());
+  Get.put(YtController(), permanent: true);
 
   runApp(const EpdApp());
 }
@@ -36,12 +39,10 @@ class EpdApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: scheme,
         scaffoldBackgroundColor: const Color(0xFFF3F5F1),
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          margin: EdgeInsets.zero,
-        ),
+        cardTheme: const CardThemeData(elevation: 0, margin: EdgeInsets.zero),
       ),
       home: const HomePage(),
+      getPages: [GetPage(name: '/yt-status', page: () => const YtStatusPage())],
     );
   }
 }

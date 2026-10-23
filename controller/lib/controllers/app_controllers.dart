@@ -21,8 +21,7 @@ class SettingsController extends GetxController {
     _box = Hive.box<dynamic>('settings');
   }
 
-  String get lastDeviceName =>
-      (_box.get('lastDeviceName') as String?) ?? '';
+  String get lastDeviceName => (_box.get('lastDeviceName') as String?) ?? '';
 
   String get lastDeviceId => (_box.get('lastDeviceId') as String?) ?? '';
 
@@ -51,8 +50,11 @@ class HistoryController extends GetxController {
         list.add(Map<String, dynamic>.from(value));
       }
     }
-    list.sort((a, b) =>
-        ((b['timestamp'] as num?) ?? 0).compareTo((a['timestamp'] as num?) ?? 0));
+    list.sort(
+      (a, b) => ((b['timestamp'] as num?) ?? 0).compareTo(
+        (a['timestamp'] as num?) ?? 0,
+      ),
+    );
     records.assignAll(list);
   }
 
@@ -147,10 +149,9 @@ class ImageController extends GetxController {
   }
 
   /// Aspect ratio of the fixed crop frame for the current [cropAngle].
-  double get cropAspectRatio =>
-      cropAngle.value % 180 == 0
-          ? BleProtocol.imageWidth / BleProtocol.imageHeight
-          : BleProtocol.imageHeight / BleProtocol.imageWidth;
+  double get cropAspectRatio => cropAngle.value % 180 == 0
+      ? BleProtocol.imageWidth / BleProtocol.imageHeight
+      : BleProtocol.imageHeight / BleProtocol.imageWidth;
 
   Size? get rotatedImageSize => displaySize.value;
 
@@ -237,7 +238,8 @@ class ImageController extends GetxController {
   /// only updates the rect so the preview is not recomputed mid-gesture.
   void setCropRect(Rect value, {bool commit = false}) {
     final current = cropRect.value;
-    final changed = (current.left - value.left).abs() > 1e-6 ||
+    final changed =
+        (current.left - value.left).abs() > 1e-6 ||
         (current.top - value.top).abs() > 1e-6 ||
         (current.right - value.right).abs() > 1e-6 ||
         (current.bottom - value.bottom).abs() > 1e-6;
@@ -343,7 +345,6 @@ class BleController extends GetxController {
 
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   StreamSubscription<dynamic>? _connectionSub;
-  Completer<EpdStatus>? _commitCompleter;
 
   @override
   void onInit() {
@@ -358,9 +359,7 @@ class BleController extends GetxController {
         scanning.value = value;
       }),
     );
-    _subscriptions.add(
-      FlutterBluePlus.onScanResults.listen(_onScanResults),
-    );
+    _subscriptions.add(FlutterBluePlus.onScanResults.listen(_onScanResults));
   }
 
   void _onScanResults(List<ScanResult> results) {
@@ -391,8 +390,8 @@ class BleController extends GetxController {
   }
 
   Future<void> scan() async {
-    if (!Platform.isAndroid &&
-        adapterState.value != BluetoothAdapterState.on) {
+    if (_transferBusy || connecting.value) return;
+    if (!Platform.isAndroid && adapterState.value != BluetoothAdapterState.on) {
       message.value = '请先打开系统蓝牙';
       return;
     }
@@ -404,27 +403,39 @@ class BleController extends GetxController {
         await FlutterBluePlus.turnOn();
       }
       await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 10),
+        timeout: Duration(
+          seconds:
+              (Hive.box<dynamic>(
+                        'settings',
+                      ).get('yt.scan_timeout_seconds', defaultValue: 30)
+                      as num)
+                  .toInt(),
+        ),
       );
     } catch (e) {
       message.value = '扫描失败：$e';
     }
   }
 
-  Future<void> connectTo(ScanResult result) async {
-    if (connecting.value || connected.value) return;
+  Future<void> connectTo(ScanResult result, {bool forTransfer = false}) async {
+    if (connecting.value ||
+        connected.value ||
+        (_transferBusy && !forTransfer)) {
+      return;
+    }
 
     connecting.value = true;
     message.value = '正在连接…';
     try {
       final d = result.device;
+      device.value = d;
       await d.connect(
         license: License.nonprofit,
         timeout: const Duration(seconds: 20),
       );
 
       device.value = d;
-      _connectionSub?.cancel();
+      await _connectionSub?.cancel();
       _connectionSub = d.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
           _handleDisconnected();
@@ -487,45 +498,103 @@ class BleController extends GetxController {
     return d.mtuNow;
   }
 
-  void _onStatusBytes(List<int> bytes) {
-    final s = EpdStatus.fromBytes(bytes);
-    status.value = s;
-    if (s.total > 0) {
-      progress.value = s.progress;
+  bool _transferBusy = false;
+
+  Future<bool> sendImage(
+    Uint8List image, {
+    required String sourceName,
+    bool retainBase = true,
+    int? scanTimeoutSeconds,
+  }) async {
+    if (_transferBusy || connecting.value) {
+      message.value = '设备忙，请稍后重试';
+      return false;
     }
-    if (s.isFinished &&
-        _commitCompleter != null &&
-        !_commitCompleter!.isCompleted) {
-      _commitCompleter!.complete(s);
+    if (image.length != BleProtocol.imageBytes) {
+      message.value = '图像长度错误：${image.length}';
+      return false;
+    }
+    _transferBusy = true;
+    sending.value = true;
+    final snapshot = Uint8List.fromList(image);
+    final sourcePath = Get.find<ImageController>().sourcePath.value;
+    try {
+      if (connected.value &&
+          device.value?.platformName != BleProtocol.deviceName) {
+        await _safeDisconnect();
+      }
+      if (!connected.value) {
+        message.value = '正在搜索 ${BleProtocol.deviceName}…';
+        final found = Completer<ScanResult>();
+        final subscription = FlutterBluePlus.onScanResults.listen((results) {
+          for (final result in results) {
+            if ((result.advertisementData.advName == BleProtocol.deviceName ||
+                    result.device.platformName == BleProtocol.deviceName) &&
+                !found.isCompleted) {
+              found.complete(result);
+            }
+          }
+        });
+        final seconds =
+            scanTimeoutSeconds ??
+            (Hive.box<dynamic>(
+                      'settings',
+                    ).get('yt.scan_timeout_seconds', defaultValue: 30)
+                    as num)
+                .toInt();
+        try {
+          if (Platform.isAndroid) await FlutterBluePlus.turnOn();
+          await FlutterBluePlus.stopScan();
+          await FlutterBluePlus.startScan(timeout: Duration(seconds: seconds));
+          final result = await found.future.timeout(Duration(seconds: seconds));
+          await FlutterBluePlus.stopScan();
+          await connectTo(result, forTransfer: true);
+          if (!connected.value) throw StateError(message.value);
+        } finally {
+          await subscription.cancel();
+          await FlutterBluePlus.stopScan();
+        }
+      }
+      return await _sendConnected(
+        snapshot,
+        sourceName: sourceName,
+        retainBase: retainBase,
+        historySourcePath: sourcePath,
+      );
+    } catch (e) {
+      message.value = '发送失败：$e';
+      return false;
+    } finally {
+      await _safeDisconnect();
+      sending.value = false;
+      _transferBusy = false;
     }
   }
 
-  Future<void> sendImage(Uint8List image, {required String sourceName}) async {
+  Future<bool> _sendConnected(
+    Uint8List image, {
+    required String sourceName,
+    required bool retainBase,
+    String? historySourcePath,
+  }) async {
     final ctrl = controlChar.value;
     final stat = statusChar.value;
     final d = device.value;
 
-    if (!connected.value ||
-        ctrl == null ||
-        stat == null ||
-        d == null) {
+    if (!connected.value || ctrl == null || stat == null || d == null) {
       message.value = '请先连接设备';
-      return;
+      return false;
     }
     if (image.length != BleProtocol.imageBytes) {
       message.value = '图像长度错误：${image.length}';
-      return;
+      return false;
     }
-    if (sending.value) return;
 
     sending.value = true;
     progress.value = 0;
     status.value = EpdStatus.idle;
     message.value = '准备发送…';
 
-    // Capture the source now: the user may load another image while the BLE
-    // transfer is in progress.
-    final historySourcePath = Get.find<ImageController>().sourcePath.value;
     final started = DateTime.now();
     try {
       final negotiatedMtu = await _waitMtu(d);
@@ -581,8 +650,7 @@ class BleController extends GetxController {
       }
 
       message.value = '校验并刷新…';
-      final completer = Completer<EpdStatus>();
-      _commitCompleter = completer;
+      EpdStatus? result;
       await ctrl.write(
         BleProtocol.commitPacket,
         withoutResponse: false,
@@ -590,22 +658,24 @@ class BleController extends GetxController {
       );
 
       final deadline = DateTime.now().add(const Duration(seconds: 240));
-      while (!completer.isCompleted) {
+      while (result == null) {
+        if (!connected.value) {
+          throw StateError('设备已断开');
+        }
         if (DateTime.now().isAfter(deadline)) {
           throw TimeoutException('刷新超时');
         }
         try {
           final read = await stat.read();
           final s = EpdStatus.fromBytes(read);
-          _onStatusBytes(read);
-          if (s.isFinished) break;
+          status.value = s;
+          if (s.isFinished) result = s;
         } catch (_) {
           // A missed notification is harmless; keep polling until timeout.
         }
         await Future<void>.delayed(const Duration(seconds: 1));
       }
 
-      final result = await completer.future;
       if (result.state != EpdState.done) {
         throw StateError(
           '设备返回错误：${result.errorLabel}'
@@ -614,14 +684,19 @@ class BleController extends GetxController {
       }
 
       final elapsed = DateTime.now().difference(started).inMilliseconds;
+      if (retainBase) {
+        await Hive.box<dynamic>('settings').put('lastBaseImage', image);
+      }
       try {
-        await Get.find<HistoryController>().add(
-          fileName: sourceName,
-          bytes: image.length,
-          durationMs: elapsed,
-          deviceName: device.value?.platformName ?? 'HUAWEI-EPD-A0',
-          sourcePath: historySourcePath,
-        );
+        if (retainBase) {
+          await Get.find<HistoryController>().add(
+            fileName: sourceName,
+            bytes: image.length,
+            durationMs: elapsed,
+            deviceName: device.value?.platformName ?? 'HUAWEI-EPD-A0',
+            sourcePath: historySourcePath,
+          );
+        }
       } catch (_) {
         // The image is already on screen; never fail the send over history.
       }
@@ -629,6 +704,7 @@ class BleController extends GetxController {
       progress.value = 1;
       status.value = result;
       message.value = '刷新完成，用时 ${(elapsed / 1000).toStringAsFixed(1)} s';
+      return true;
     } catch (e) {
       message.value = '发送失败：$e';
       try {
@@ -636,8 +712,8 @@ class BleController extends GetxController {
       } catch (_) {
         // Device may already be disconnected.
       }
+      return false;
     } finally {
-      _commitCompleter = null;
       sending.value = false;
     }
   }
@@ -663,22 +739,18 @@ class BleController extends GetxController {
     mtu.value = 0;
     status.value = EpdStatus.idle;
     progress.value = 0;
-    if (_commitCompleter != null && !_commitCompleter!.isCompleted) {
-      _commitCompleter!.completeError(StateError('设备已断开'));
-    }
-    _commitCompleter = null;
-    sending.value = false;
+    // The transfer owns its busy flag until disconnect cleanup completes.
   }
 
   String get adapterLabel => switch (adapterState.value) {
-        BluetoothAdapterState.unknown => '蓝牙状态未知',
-        BluetoothAdapterState.unavailable => '蓝牙不可用',
-        BluetoothAdapterState.unauthorized => '未授权蓝牙',
-        BluetoothAdapterState.turningOn => '正在打开蓝牙',
-        BluetoothAdapterState.on => '蓝牙已开启',
-        BluetoothAdapterState.turningOff => '正在关闭蓝牙',
-        BluetoothAdapterState.off => '蓝牙已关闭',
-      };
+    BluetoothAdapterState.unknown => '蓝牙状态未知',
+    BluetoothAdapterState.unavailable => '蓝牙不可用',
+    BluetoothAdapterState.unauthorized => '未授权蓝牙',
+    BluetoothAdapterState.turningOn => '正在打开蓝牙',
+    BluetoothAdapterState.on => '蓝牙已开启',
+    BluetoothAdapterState.turningOff => '正在关闭蓝牙',
+    BluetoothAdapterState.off => '蓝牙已关闭',
+  };
 
   @override
   void onClose() {

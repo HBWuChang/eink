@@ -11,60 +11,69 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('墨水屏控制器'),
+        actions: [
+          TextButton(
+            onPressed: () => Get.toNamed('/yt-status'),
+            child: const Text('YT 状态'),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxHeight > constraints.maxWidth) {
-            return SingleChildScrollView(
-              key: const ValueKey('portrait-scroll'),
-              padding: const EdgeInsets.all(16),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ImageEditorPanel(squarePreview: true),
-                  SizedBox(height: 16),
-                  BlePanel(scrollable: true),
-                ],
+          builder: (context, constraints) {
+            if (constraints.maxHeight > constraints.maxWidth) {
+              return SingleChildScrollView(
+                key: const ValueKey('portrait-scroll'),
+                padding: const EdgeInsets.all(16),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ImageEditorPanel(squarePreview: true),
+                    SizedBox(height: 16),
+                    BlePanel(scrollable: true),
+                  ],
+                ),
+              );
+            }
+            final wide = constraints.maxWidth >= 1000;
+            final editor = const Expanded(
+              flex: 3,
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: ImageEditorPanel(),
               ),
             );
-          }
-          final wide = constraints.maxWidth >= 1000;
-          final editor = const Expanded(
-            flex: 3,
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: ImageEditorPanel(),
-            ),
-          );
-          final side = const SizedBox(
-            width: 390,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(0, 16, 16, 16),
-              child: BlePanel(),
-            ),
-          );
-          final content = Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: wide
-                ? [editor, side]
-                : [
-                    editor,
-                    SizedBox(
-                      width: constraints.maxWidth * 0.40,
-                      child: const Padding(
-                        padding: EdgeInsets.fromLTRB(0, 16, 16, 16),
-                        child: BlePanel(),
-                      ),
-                    ),
-                  ],
-          );
-          if (constraints.maxHeight < 700) {
-            return SingleChildScrollView(
-              child: SizedBox(height: 700, child: content),
+            final side = const SizedBox(
+              width: 390,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(0, 16, 16, 16),
+                child: BlePanel(),
+              ),
             );
-          }
-          return content;
-        },
+            final content = Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: wide
+                  ? [editor, side]
+                  : [
+                      editor,
+                      SizedBox(
+                        width: constraints.maxWidth * 0.40,
+                        child: const Padding(
+                          padding: EdgeInsets.fromLTRB(0, 16, 16, 16),
+                          child: BlePanel(),
+                        ),
+                      ),
+                    ],
+            );
+            if (constraints.maxHeight < 700) {
+              return SingleChildScrollView(
+                child: SizedBox(height: 700, child: content),
+              );
+            }
+            return content;
+          },
         ),
       ),
     );
@@ -261,12 +270,14 @@ class _BlankColorRow extends StatelessWidget {
         const SizedBox(width: 8),
         Text('#$hex', style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(width: 8),
-        Flexible(child: Text(
-          '超出图像的部分',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).disabledColor,
+        Flexible(
+          child: Text(
+            '超出图像的部分',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).disabledColor,
+            ),
           ),
-        )),
+        ),
       ],
     );
   }
@@ -553,7 +564,7 @@ class BlePanel extends StatelessWidget {
                 const SizedBox(height: 10),
                 FilledButton.icon(
                   onPressed:
-                      (!ble.connected.value ||
+                      (ble.connecting.value ||
                           ble.sending.value ||
                           image.processing.value ||
                           image.packed.value == null)
@@ -581,10 +592,7 @@ class BlePanel extends StatelessWidget {
                 if (image.packed.value == null)
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
-                    child: Text(
-                      '请先选择图片并生成预览。',
-                      style: TextStyle(fontSize: 12),
-                    ),
+                    child: Text('请先选择图片并生成预览。', style: TextStyle(fontSize: 12)),
                   ),
               ],
               const SizedBox(height: 12),
@@ -609,11 +617,15 @@ class BlePanel extends StatelessWidget {
                 history.records.isEmpty
                     ? const SizedBox(
                         height: 64,
-                        child: Center(child: Text('暂无历史', style: TextStyle(fontSize: 12))),
+                        child: Center(
+                          child: Text('暂无历史', style: TextStyle(fontSize: 12)),
+                        ),
                       )
                     : ListView.builder(
                         shrinkWrap: scrollable,
-                        physics: scrollable ? const NeverScrollableScrollPhysics() : null,
+                        physics: scrollable
+                            ? const NeverScrollableScrollPhysics()
+                            : null,
                         itemCount: history.records.length,
                         itemBuilder: (context, index) {
                           final r = history.records[index];
