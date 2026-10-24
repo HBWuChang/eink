@@ -30,28 +30,42 @@ void main() {
       });
       await tester.pumpWidget(const GetMaterialApp(home: YtStatusPage()));
       Future<void> render() async {
-        await tester.pump(const Duration(milliseconds: 250));
-        await tester.runAsync(() async {
-          await Future<void>.delayed(const Duration(milliseconds: 200));
-        });
-        await tester.pump();
+        for (var attempt = 0; attempt < 5; attempt++) {
+          await tester.pump(const Duration(milliseconds: 250));
+          await tester.runAsync(() async {
+            await Future<void>.delayed(const Duration(milliseconds: 200));
+          });
+          await tester.pump();
+        }
       }
 
       await render();
       final preview = find.byKey(const ValueKey('yt-preview'));
-      await tester.ensureVisible(preview);
+      await tester.scrollUntilVisible(
+        preview,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pump();
       Uint8List bytes() =>
           ((tester.widget<Image>(preview)).image as MemoryImage).bytes;
       final original = Uint8List.fromList(bytes());
       final rotation = find.byKey(const ValueKey('rotation-0'));
-      await tester.ensureVisible(rotation);
+      await tester.scrollUntilVisible(
+        rotation,
+        -300,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(rotation);
       await tester.pumpAndSettle();
       await tester.tap(find.text('90°').last);
       await tester.pump();
       await render();
-      await tester.ensureVisible(preview);
+      await tester.scrollUntilVisible(
+        preview,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pump();
       expect(bytes(), isNot(orderedEquals(original)));
       expect(controller.box.get('yt.config'), isNull);

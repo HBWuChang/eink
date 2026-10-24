@@ -9,6 +9,7 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
+    (NSApp.delegate as? AppDelegate)?.configureBackground(controller: flutterViewController, window: self)
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()

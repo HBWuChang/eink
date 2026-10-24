@@ -151,7 +151,7 @@ class _YtStatusPageState extends State<YtStatusPage> {
       padding: const EdgeInsets.all(20),
       children: [
         const Text(
-          '每 10 分钟检查并叠加至最后一次正常发送的底图。红：已过期；黄：预警时间内到期；黑：其余。YT 更新不会保留为底图或发送历史。',
+          '每 10 分钟检查并叠加至最后一次正常发送的底图。红：距到期不超过 2 小时（含已过期）；黄：其余预警期内到期；黑：其余。YT 更新不会保留为底图或发送历史。',
         ),
         Obx(
           () => SwitchListTile(
@@ -323,7 +323,17 @@ class _YtStatusPageState extends State<YtStatusPage> {
         ),
         if (error.isNotEmpty)
           Text(error, style: const TextStyle(color: Colors.red)),
+        Obx(() => Text(controller.backgroundStatus.value)),
         Obx(() => Text(controller.message.value)),
+        Obx(
+          () => ExpansionTile(
+            title: const Text('后台更新记录'),
+            children: controller.events
+                .take(15)
+                .map((event) => ListTile(dense: true, title: Text(event)))
+                .toList(),
+          ),
+        ),
         Obx(() => Text(controller.ranking.value)),
         Obx(
           () => Column(

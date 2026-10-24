@@ -9,6 +9,10 @@ void main() {
     YtIssue issue(Duration delta) =>
         YtIssue('A', '', now.add(delta).millisecondsSinceEpoch);
     expect(issue(Duration.zero).colorIndex(now, 24), 3);
+    expect(issue(const Duration(hours: -1)).colorIndex(now, 24), 3);
+    expect(issue(const Duration(hours: 2)).colorIndex(now, 24), 3);
+    expect(issue(const Duration(hours: 2, seconds: 1)).colorIndex(now, 24), 2);
+    expect(issue(const Duration(hours: 2)).colorIndex(now, 1), 3);
     expect(issue(const Duration(hours: 24)).colorIndex(now, 24), 2);
     expect(issue(const Duration(hours: 24, seconds: 1)).colorIndex(now, 24), 0);
     expect(YtIssue('B', '', null).colorIndex(now, 24), 0);
@@ -140,7 +144,7 @@ void main() {
             'YELLOW',
             '',
             now
-                .add(const Duration(hours: 1, minutes: 7))
+                .add(const Duration(hours: 3, minutes: 7))
                 .millisecondsSinceEpoch,
           ),
           YtIssue(
@@ -153,9 +157,9 @@ void main() {
         24,
       );
       expect(rows.map((r) => r.text), [
-        '-0时01分  RED',
-        '1时07分  YELLOW',
-        '48时05分  BLACK',
+        '-0h01m  RED',
+        '3h07m  YELLOW',
+        '48h05m  BLACK',
       ]);
       expect(rows.map((r) => r.colorIndex), [3, 2, 0]);
       expect(
@@ -170,7 +174,7 @@ void main() {
           now,
           24,
         ).single.text,
-        '0时01分  SOON',
+        '0h01m  SOON',
       );
       expect(
         ytDeadlineRows(
@@ -178,7 +182,7 @@ void main() {
           now,
           24,
         ).single,
-        (text: '-0时00分  NOW', colorIndex: 3),
+        (text: '-0h00m  NOW', colorIndex: 3),
       );
 
       expect(ytDeadlineRows([], now, 24), isEmpty);

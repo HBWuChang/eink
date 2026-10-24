@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'ble_protocol.dart';
 
@@ -90,7 +90,7 @@ class YtIssue {
   int colorIndex(DateTime now, int hours) {
     if (expiration == null) return 0;
     final remaining = expiration! - now.millisecondsSinceEpoch;
-    return remaining <= 0
+    return remaining <= const Duration(hours: 2).inMilliseconds
         ? 3
         : remaining <= Duration(hours: hours).inMilliseconds
         ? 2
@@ -249,6 +249,12 @@ Future<Uint8List> overlayYt(
       !YtConfig.positions.containsKey(position)) {
     throw const FormatException('文字方向或位置无效');
   }
+  final overdue = issues
+      .where(
+        (e) =>
+            e.expiration != null && e.expiration! <= now.millisecondsSinceEpoch,
+      )
+      .length;
   final red = issues.where((e) => e.colorIndex(now, hours) == 3).length;
   final yellow = issues.where((e) => e.colorIndex(now, hours) == 2).length;
   final color = red > 0
@@ -262,54 +268,88 @@ Future<Uint8List> overlayYt(
     2 => const ui.Color(0xFFF5CD00),
     _ => const ui.Color(0xFF000000),
   };
-  final recorder = ui.PictureRecorder();
-  final canvas = ui.Canvas(recorder);
+  final rows = <Map<String, Object>>[];
   void text(String value, double size, double y, ui.Color color) {
-    final painter = TextPainter(
-      text: TextSpan(
-        text: value,
-        style: TextStyle(
-          fontFamily: 'PingFang SC',
-          fontFamilyFallback: const ['Heiti SC', 'Arial'],
-          fontSize: size,
-          color: color,
-          height: 1,
-        ),
-      ),
-      textDirection: ui.TextDirection.ltr,
-      locale: const ui.Locale('zh', 'CN'),
-      maxLines: 1,
-      ellipsis: '…',
-    )..layout(maxWidth: 456);
-    painter.paint(canvas, ui.Offset(12, y));
-    painter.dispose();
+    rows.add({'text': value, 'size': size, 'y': y, 'color': color.toARGB32()});
   }
 
   text('YT 剩余：${issues.length}', 40, 4, color);
-  text('已过期：$red    即将到期：$yellow', 18, 55, const ui.Color(0xFF000000));
+  text(
+    '已过期：$overdue    即将到期：${issues.where((e) => e.expiration != null && e.expiration! > now.millisecondsSinceEpoch && e.colorIndex(now, hours) != 0).length}',
+    18,
+    55,
+    const ui.Color(0xFF000000),
+  );
   for (var i = 0; i < deadlines.length; i++) {
     final row = deadlines[i];
     text(row.text, 40, 82 + i * 52.0, deadlineColor(row.colorIndex));
   }
   text('更新：$timestamp', 16, 244, const ui.Color(0xFF000000));
-  final picture = recorder.endRecording();
-  final raster = await picture.toImage(480, 264);
+
   late img.Image panel;
-  try {
-    final rgba = await raster.toByteData(
-      format: ui.ImageByteFormat.rawStraightRgba,
-    );
-    if (rgba == null) throw StateError('文字图像生成失败');
-    panel = img.Image.fromBytes(
-      width: 480,
-      height: 264,
-      bytes: rgba.buffer,
-      bytesOffset: rgba.offsetInBytes,
-      numChannels: 4,
-    );
-  } finally {
-    raster.dispose();
-    picture.dispose();
+  Uint8List? nativePng;
+  if (Platform.isMacOS) {
+    try {
+      nativePng = await const MethodChannel('epd/background')
+          .invokeMethod<Uint8List>('renderText', rows)
+          .timeout(const Duration(seconds: 20));
+      if (nativePng == null) throw StateError('CPU 文字绘制返回空数据');
+    } on MissingPluginException {
+      // Flutter widget tests and non-native hosts use the portable renderer.
+    }
+  }
+  if (nativePng != null) {
+    final decoded = img.decodePng(nativePng);
+    if (decoded == null) throw StateError('CPU 文字图像解码失败');
+    panel = decoded;
+  } else {
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    for (final row in rows) {
+      final value = row['text'] as String;
+      final size = row['size'] as double;
+      final y = row['y'] as double;
+      final color = ui.Color(row['color'] as int);
+      final painter = TextPainter(
+        text: TextSpan(
+          text: value,
+          style: TextStyle(
+            fontFamily: 'PingFang SC',
+            fontFamilyFallback: const ['Heiti SC', 'Arial'],
+            fontSize: size,
+            color: color,
+            height: 1,
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+        locale: const ui.Locale('zh', 'CN'),
+        maxLines: 1,
+        ellipsis: '…',
+      )..layout(maxWidth: 456);
+      painter.paint(canvas, ui.Offset(12, y));
+      painter.dispose();
+    }
+
+    final picture = recorder.endRecording();
+    final raster = await picture
+        .toImage(480, 264)
+        .timeout(const Duration(seconds: 20));
+    try {
+      final rgba = await raster.toByteData(
+        format: ui.ImageByteFormat.rawStraightRgba,
+      );
+      if (rgba == null) throw StateError('文字图像生成失败');
+      panel = img.Image.fromBytes(
+        width: 480,
+        height: 264,
+        bytes: rgba.buffer,
+        bytesOffset: rgba.offsetInBytes,
+        numChannels: 4,
+      );
+    } finally {
+      raster.dispose();
+      picture.dispose();
+    }
   }
   if (rotation != 0) panel = img.copyRotate(panel, angle: rotation);
   final column = position.endsWith('left')
