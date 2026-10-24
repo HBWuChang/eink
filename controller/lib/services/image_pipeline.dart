@@ -6,6 +6,46 @@ import 'package:image/image.dart' as img;
 
 import 'ble_protocol.dart';
 
+enum DitherAlgorithm {
+  none('不使用抖动'),
+  fs('FS'),
+  jjn('JJN'),
+  stucki('Stucki');
+
+  const DitherAlgorithm(this.label);
+  final String label;
+}
+
+const _fs = [(1, 0, 7), (-1, 1, 3), (0, 1, 5), (1, 1, 1)];
+const _jjn = [
+  (1, 0, 7),
+  (2, 0, 5),
+  (-2, 1, 3),
+  (-1, 1, 5),
+  (0, 1, 7),
+  (1, 1, 5),
+  (2, 1, 3),
+  (-2, 2, 1),
+  (-1, 2, 3),
+  (0, 2, 5),
+  (1, 2, 3),
+  (2, 2, 1),
+];
+const _stucki = [
+  (1, 0, 8),
+  (2, 0, 4),
+  (-2, 1, 2),
+  (-1, 1, 4),
+  (0, 1, 8),
+  (1, 1, 4),
+  (2, 1, 2),
+  (-2, 2, 1),
+  (-1, 2, 2),
+  (0, 2, 4),
+  (1, 2, 2),
+  (2, 2, 1),
+];
+
 typedef RenderResult = ({Uint8List packed, Uint8List previewPng});
 
 /// Decoded, EXIF-baked and rotated image used for on-screen editing.
@@ -28,7 +68,7 @@ RenderResult renderImageSync({
   required double cropBottom,
   required int cropAngle,
   required int blankColor,
-  required bool dither,
+  required DitherAlgorithm algorithm,
 }) {
   img.Image? decoded = img.decodeImage(sourceBytes);
   if (decoded == null) {
@@ -76,22 +116,23 @@ RenderResult renderImageSync({
   ];
 
   final packed = Uint8List(BleProtocol.imageBytes);
-  final preview = img.Image(
-    width: targetW,
-    height: targetH,
-    numChannels: 3,
-  );
+  final preview = img.Image(width: targetW, height: targetH, numChannels: 3);
 
-  // Floyd-Steinberg, exactly as ImageRaster.quantize(..., dither=true)
-  // in the Android project:
-  //   right 7/16, bottom-left 3/16, bottom 5/16, bottom-right 1/16.
-  var current = List<Float64List>.generate(
+  final kernel = switch (algorithm) {
+    DitherAlgorithm.none => const <(int, int, int)>[],
+    DitherAlgorithm.fs => _fs,
+    DitherAlgorithm.jjn => _jjn,
+    DitherAlgorithm.stucki => _stucki,
+  };
+  final divisor = switch (algorithm) {
+    DitherAlgorithm.jjn => 48,
+    DitherAlgorithm.stucki => 42,
+    _ => 16,
+  };
+  // Three rolling rows cover the two-row JJN and Stucki kernels.
+  final errors = List.generate(
     3,
-    (_) => Float64List(targetW + 2),
-  );
-  var next = List<Float64List>.generate(
-    3,
-    (_) => Float64List(targetW + 2),
+    (_) => List.generate(3, (_) => Float64List(targetW)),
   );
 
   var out = 0;
@@ -99,13 +140,10 @@ RenderResult renderImageSync({
     for (var x = 0; x < targetW; x++) {
       final p = canvas.getPixel(x, y);
 
-      final er = dither ? current[0][x + 1] : 0.0;
-      final eg = dither ? current[1][x + 1] : 0.0;
-      final eb = dither ? current[2][x + 1] : 0.0;
-
-      final r = _clamp(p.r.toDouble() + er);
-      final g = _clamp(p.g.toDouble() + eg);
-      final b = _clamp(p.b.toDouble() + eb);
+      final current = errors[y % 3];
+      final r = _clamp(p.r.toDouble() + current[0][x]);
+      final g = _clamp(p.g.toDouble() + current[1][x]);
+      final b = _clamp(p.b.toDouble() + current[2][x]);
 
       var best = 0;
       var bestDistance = double.infinity;
@@ -120,11 +158,15 @@ RenderResult renderImageSync({
         }
       }
 
-      if (dither) {
-        final c = palette[best];
-        _spread(current[0], next[0], x, r - c[0]);
-        _spread(current[1], next[1], x, g - c[1]);
-        _spread(current[2], next[2], x, b - c[2]);
+      final c = palette[best];
+      for (final (dx, dy, weight) in kernel) {
+        final nx = x + dx;
+        final ny = y + dy;
+        if (nx < 0 || nx >= targetW || ny >= targetH) continue;
+        final row = errors[ny % 3];
+        row[0][nx] += (r - c[0]) * weight / divisor;
+        row[1][nx] += (g - c[1]) * weight / divisor;
+        row[2][nx] += (b - c[2]) * weight / divisor;
       }
 
       if ((x & 3) == 0) {
@@ -140,10 +182,7 @@ RenderResult renderImageSync({
       );
     }
 
-    final old = current;
-    current = next;
-    next = old;
-    for (final channel in next) {
+    for (final channel in errors[y % 3]) {
       channel.fillRange(0, channel.length, 0);
     }
   }
@@ -160,13 +199,6 @@ double _clamp(double value) {
   return value;
 }
 
-void _spread(Float64List current, Float64List next, int x, double error) {
-  current[x + 2] += error * 7 / 16;
-  next[x] += error * 3 / 16;
-  next[x + 1] += error * 5 / 16;
-  next[x + 2] += error / 16;
-}
-
 Future<RenderResult> renderImage({
   required Uint8List sourceBytes,
   required int rotation,
@@ -176,7 +208,7 @@ Future<RenderResult> renderImage({
   required double cropBottom,
   required int cropAngle,
   required int blankColor,
-  required bool dither,
+  required DitherAlgorithm algorithm,
 }) {
   return Isolate.run(
     () => renderImageSync(
@@ -188,7 +220,7 @@ Future<RenderResult> renderImage({
       cropBottom: cropBottom,
       cropAngle: cropAngle,
       blankColor: blankColor,
-      dither: dither,
+      algorithm: algorithm,
     ),
   );
 }
@@ -274,10 +306,7 @@ Future<DisplayImage> buildDisplayImage({
   required int rotation,
 }) {
   return Isolate.run(
-    () => buildDisplayImageSync(
-      sourceBytes: sourceBytes,
-      rotation: rotation,
-    ),
+    () => buildDisplayImageSync(sourceBytes: sourceBytes, rotation: rotation),
   );
 }
 
@@ -301,13 +330,31 @@ Uint8List createTestPatternPng() {
   }
 
   // Black frame + diagonal marker to expose rotation/mirroring.
-  img.fillRect(image, x1: 0, y1: 0, x2: w - 1, y2: 5,
-      color: img.ColorRgb8(0, 0, 0));
-  img.fillRect(image, x1: 0, y1: h - 6, x2: w - 1, y2: h - 1,
-      color: img.ColorRgb8(0, 0, 0));
+  img.fillRect(
+    image,
+    x1: 0,
+    y1: 0,
+    x2: w - 1,
+    y2: 5,
+    color: img.ColorRgb8(0, 0, 0),
+  );
+  img.fillRect(
+    image,
+    x1: 0,
+    y1: h - 6,
+    x2: w - 1,
+    y2: h - 1,
+    color: img.ColorRgb8(0, 0, 0),
+  );
   for (var i = 0; i < 80; i++) {
-    img.fillRect(image, x1: i * 8, y1: i * 6, x2: i * 8 + 5,
-        y2: i * 6 + 5, color: img.ColorRgb8(0, 0, 0));
+    img.fillRect(
+      image,
+      x1: i * 8,
+      y1: i * 6,
+      x2: i * 8 + 5,
+      y2: i * 6 + 5,
+      color: img.ColorRgb8(0, 0, 0),
+    );
   }
 
   return Uint8List.fromList(img.encodePng(image));

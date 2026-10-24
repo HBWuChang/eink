@@ -98,6 +98,7 @@ class HistoryController extends GetxController {
 
 class ImageController extends GetxController {
   static const _keyDither = 'editor.dither';
+  static const _keyDitherAlgorithm = 'editor.ditherAlgorithm';
   static const _keyCropAngle = 'editor.cropAngle';
   static const _keyBlankColor = 'editor.blankColor';
 
@@ -112,7 +113,7 @@ class ImageController extends GetxController {
   final blankColor = const Color(0xFFFFFFFF).obs;
   final displayBytes = Rxn<Uint8List>();
   final displaySize = Rxn<Size>();
-  final dither = false.obs;
+  final ditherAlgorithm = DitherAlgorithm.none.obs;
   final processing = false.obs;
   final error = ''.obs;
   final viewResetToken = 0.obs;
@@ -137,7 +138,16 @@ class ImageController extends GetxController {
     if (box == null) return;
 
     final savedDither = box.get(_keyDither);
-    if (savedDither is bool) dither.value = savedDither;
+    ditherAlgorithm.value = savedDither == true
+        ? DitherAlgorithm.fs
+        : DitherAlgorithm.none;
+    final savedAlgorithm = box.get(_keyDitherAlgorithm);
+    for (final algorithm in DitherAlgorithm.values) {
+      if (algorithm.name == savedAlgorithm) {
+        ditherAlgorithm.value = algorithm;
+        break;
+      }
+    }
 
     final savedAngle = box.get(_keyCropAngle);
     if (savedAngle is int && cropAngles.contains(savedAngle)) {
@@ -262,10 +272,10 @@ class ImageController extends GetxController {
     _scheduleRender();
   }
 
-  void setDither(bool value) {
-    if (dither.value == value) return;
-    dither.value = value;
-    _settingsBox?.put(_keyDither, value);
+  void setDitherAlgorithm(DitherAlgorithm value) {
+    if (ditherAlgorithm.value == value) return;
+    ditherAlgorithm.value = value;
+    _settingsBox?.put(_keyDitherAlgorithm, value.name);
     render();
   }
 
@@ -293,7 +303,7 @@ class ImageController extends GetxController {
         cropBottom: rect.bottom,
         cropAngle: cropAngle.value,
         blankColor: blankColor.value.toARGB32() & 0xFFFFFF,
-        dither: dither.value,
+        algorithm: ditherAlgorithm.value,
       );
       if (token != _renderToken) return;
       previewPng.value = result.previewPng;
@@ -314,7 +324,7 @@ class ImageController extends GetxController {
     final p = packed.value;
     if (p == null) return '768×552 · 2bpp · 105984 字节';
     return '${BleProtocol.imageWidth}×${BleProtocol.imageHeight} · '
-        '2bpp · 抖动${dither.value ? '开' : '关'} · ${p.length} 字节 · CRC32 '
+        '2bpp · ${ditherAlgorithm.value.label} · ${p.length} 字节 · CRC32 '
         '${BleProtocol.crc32(p).toRadixString(16).toUpperCase().padLeft(8, '0')}';
   }
 

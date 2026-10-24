@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../controllers/app_controllers.dart';
 import '../services/ble_protocol.dart';
+import '../services/image_pipeline.dart';
 import '../widgets/crop_editor.dart';
 
 class HomePage extends StatelessWidget {
@@ -171,13 +172,29 @@ class ImageEditorPanel extends StatelessWidget {
                 color: image.blankColor.value,
                 onChanged: image.setBlankColor,
               ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: const Text('抖动处理（Floyd–Steinberg）'),
-                subtitle: const Text('与手机 App 四色抖动一致；细碎色点更多'),
-                value: image.dither.value,
-                onChanged: image.setDither,
+              RadioGroup<DitherAlgorithm>(
+                groupValue: image.ditherAlgorithm.value,
+                onChanged: (value) {
+                  if (value != null) image.setDitherAlgorithm(value);
+                },
+                child: Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Text('抖动算法'),
+                    for (final algorithm in DitherAlgorithm.values)
+                      TextButton(
+                        onPressed: () => image.setDitherAlgorithm(algorithm),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Radio<DitherAlgorithm>(value: algorithm),
+                            Text(algorithm.label),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
               const SizedBox(height: 4),
               Text(image.info, style: Theme.of(context).textTheme.bodySmall),

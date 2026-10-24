@@ -15,7 +15,7 @@ void main() {
       cropBottom: 1,
       cropAngle: 0,
       blankColor: 0xFFFFFF,
-      dither: false,
+      algorithm: DitherAlgorithm.none,
     );
     expect(result.packed.length, BleProtocol.imageBytes);
     final preview = img.decodePng(result.previewPng)!;
@@ -34,7 +34,7 @@ void main() {
       cropBottom: 1.5,
       cropAngle: 0,
       blankColor: 0x000000,
-      dither: false,
+      algorithm: DitherAlgorithm.none,
     );
     expect(result.packed.length, BleProtocol.imageBytes);
     final preview = img.decodePng(result.previewPng)!;
@@ -57,7 +57,7 @@ void main() {
         cropBottom: 2,
         cropAngle: 0,
         blankColor: blankColor,
-        dither: false,
+        algorithm: DitherAlgorithm.none,
       );
       final corner = img.decodePng(result.previewPng)!.getPixel(0, 0);
       return (corner.r.toInt(), corner.g.toInt(), corner.b.toInt());
@@ -81,12 +81,59 @@ void main() {
       cropBottom: 0.75,
       cropAngle: 90,
       blankColor: 0xFFFFFF,
-      dither: true,
+      algorithm: DitherAlgorithm.fs,
     );
     expect(result.packed.length, BleProtocol.imageBytes);
     final preview = img.decodePng(result.previewPng)!;
     expect(preview.width, BleProtocol.imageWidth);
     expect(preview.height, BleProtocol.imageHeight);
+  });
+
+  test('all diffusion modes produce distinct valid packed previews', () {
+    final source = img.Image(width: 768, height: 552, numChannels: 3);
+    img.fill(source, color: img.ColorRgb8(128, 128, 128));
+    final bytes = img.encodePng(source);
+    final outputs = <List<int>>[];
+    const palette = [(0, 0, 0), (255, 255, 255), (245, 205, 0), (200, 0, 0)];
+    for (final algorithm in DitherAlgorithm.values) {
+      final result = renderImageSync(
+        sourceBytes: bytes,
+        rotation: 0,
+        cropLeft: 0,
+        cropTop: 0,
+        cropRight: 1,
+        cropBottom: 1,
+        cropAngle: 0,
+        blankColor: 0xFFFFFF,
+        algorithm: algorithm,
+      );
+      expect(result.packed.length, BleProtocol.imageBytes);
+      final preview = img.decodePng(result.previewPng)!;
+      final indices = <int>{};
+      for (var y = 0; y < preview.height; y++) {
+        for (var x = 0; x < preview.width; x++) {
+          final index =
+              (result.packed[y * BleProtocol.rowBytes + (x >> 2)] >>
+                  (6 - 2 * (x & 3))) &
+              3;
+          indices.add(index);
+          final pixel = preview.getPixel(x, y);
+          expect((
+            pixel.r.toInt(),
+            pixel.g.toInt(),
+            pixel.b.toInt(),
+          ), palette[index]);
+        }
+      }
+      expect(
+        indices.length,
+        algorithm == DitherAlgorithm.none ? 1 : greaterThan(1),
+      );
+      for (final previous in outputs) {
+        expect(result.packed, isNot(orderedEquals(previous)));
+      }
+      outputs.add(result.packed);
+    }
   });
 
   test('display image is rotated and reports rotated dimensions', () {

@@ -1,5 +1,6 @@
 import 'package:controller/controllers/app_controllers.dart';
 import 'package:controller/pages/home_page.dart';
+import 'package:controller/services/image_pipeline.dart';
 import 'package:controller/widgets/crop_editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,7 +21,12 @@ class _TestHistoryController extends HistoryController {
 }
 
 void main() {
-  for (final size in [const Size(360, 800), const Size(800, 1200), const Size(1200, 800), const Size(800, 360)]) {
+  for (final size in [
+    const Size(360, 800),
+    const Size(800, 1200),
+    const Size(1200, 800),
+    const Size(800, 360),
+  ]) {
     testWidgets('home layout at $size', (tester) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
@@ -30,14 +36,28 @@ void main() {
       Get.put(ImageController());
       Get.put<BleController>(_TestBleController());
       final history = Get.put<HistoryController>(_TestHistoryController());
-      history.records.assignAll(List.generate(20, (i) => {
-        'fileName': 'history-$i',
-        'timestamp': i,
-      }));
+      history.records.assignAll(
+        List.generate(20, (i) => {'fileName': 'history-$i', 'timestamp': i}),
+      );
       addTearDown(Get.reset);
       await tester.pumpWidget(const GetMaterialApp(home: HomePage()));
       await tester.pump();
       expect(tester.takeException(), isNull);
+      expect(find.byType(Radio<DitherAlgorithm>), findsNWidgets(4));
+      final group = tester.widget<RadioGroup<DitherAlgorithm>>(
+        find.byType(RadioGroup<DitherAlgorithm>),
+      );
+      expect(group.groupValue, DitherAlgorithm.none);
+      // The entire labelled option is clickable.
+      await tester.ensureVisible(find.text('JJN'));
+      await tester.tap(find.text('JJN'));
+      await tester.pump();
+      expect(
+        Get.find<ImageController>().ditherAlgorithm.value,
+        DitherAlgorithm.jjn,
+      );
+      await tester.ensureVisible(find.byType(CropEditor));
+      await tester.pumpAndSettle();
       final editor = tester.getRect(find.byType(CropEditor));
       final ble = tester.getRect(find.byType(BlePanel));
       if (size.height > size.width) {
