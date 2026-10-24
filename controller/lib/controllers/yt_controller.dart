@@ -8,6 +8,7 @@ import 'package:hive/hive.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import '../services/youtrack_service.dart';
+import '../services/clock_out_service.dart';
 import 'app_controllers.dart';
 
 class YtController extends GetxController {
@@ -18,6 +19,27 @@ class YtController extends GetxController {
   final backgroundStatus = '后台尚未启用'.obs;
   final events = <String>[].obs;
   final service = YouTrackService();
+  final clockData = Rxn<ClockOutData>();
+  final clockStatus = '下班：未配置'.obs;
+  String clockLabel(YtConfig draft, DateTime now) =>
+      clockData.value?.label(
+        now,
+        draft.number('work_hours'),
+        draft.text('timezone'),
+      ) ??
+      clockStatus.value;
+
+  Future<Map<String, dynamic>?> importClockConfig() async {
+    final file = await openFile(
+      initialDirectory: '/Users/cd022/HBWuChang/code/clockOut/clockOut',
+      acceptedTypeGroups: [
+        const XTypeGroup(label: 'clockOut Swift 配置', extensions: ['swift']),
+      ],
+    );
+    if (file == null) return null;
+    return ClockOutService.importSwift(await file.readAsString());
+  }
+
   static const channel = MethodChannel('epd/background');
   Box<dynamic> get box => Hive.box<dynamic>('settings');
   YtConfig get config => YtConfig(
@@ -162,6 +184,21 @@ class YtController extends GetxController {
       final found = await service.issues(current);
       if (generation != _generation) return;
       logEvent('查询完成：${found.length} 条');
+      clockData.value = null;
+      if (current.text('clock_token').isEmpty ||
+          current.text('clock_url').isEmpty) {
+        clockStatus.value = '下班：未配置';
+      } else {
+        try {
+          clockData.value = await ClockOutService().fetch(current);
+          clockStatus.value = clockLabel(current, DateTime.now());
+        } catch (_) {
+          clockStatus.value = '下班：查询失败';
+          logEvent('打卡查询失败（不影响 YT 更新）');
+        }
+      }
+      if (generation != _generation) return;
+
       hasData.value = true;
       issues.assignAll(found);
       final base = box.get('lastBaseImage');
@@ -184,6 +221,8 @@ class YtController extends GetxController {
           local.toString().substring(0, 16),
           rotation: current.number('text_rotation'),
           position: current.text('text_position'),
+          clockLabel: clockLabel(current, now),
+          clockMetrics: clockData.value?.metrics ?? 'WK:-- ALL:-- S:--',
         );
         if (generation != _generation) return;
         logEvent('文字绘制完成，开始蓝牙发送');

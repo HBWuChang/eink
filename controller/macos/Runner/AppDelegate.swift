@@ -54,7 +54,7 @@ class AppDelegate: FlutterAppDelegate {
 
   // CoreText draws into CPU memory, independent of Flutter's frame/GPU lifecycle.
   static func renderText(rows: [[String: Any]]) -> Data? {
-    let width = 480, height = 264
+    let width = 480, height = 360
     guard let context = CGContext(data: nil, width: width, height: height,
       bitsPerComponent: 8, bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(),

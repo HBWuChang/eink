@@ -40,8 +40,8 @@ void main() {
       expect(base.every((e) => e == 0xaa), isTrue);
       expect(output.length, base.length);
       expect(
-        output.sublist(0, 288 * BleProtocol.rowBytes),
-        base.sublist(0, 288 * BleProtocol.rowBytes),
+        output.sublist(0, 192 * BleProtocol.rowBytes),
+        base.sublist(0, 192 * BleProtocol.rowBytes),
       );
       expect(output, isNot(base));
     });
@@ -79,8 +79,8 @@ void main() {
               rotation: angle,
               position: position,
             );
-            final w = angle % 180 == 0 ? 480 : 264;
-            final h = angle % 180 == 0 ? 264 : 480;
+            final w = angle % 180 == 0 ? 480 : 360;
+            final h = angle % 180 == 0 ? 360 : 480;
             final col = position.endsWith('left')
                 ? 0
                 : position.endsWith('right')

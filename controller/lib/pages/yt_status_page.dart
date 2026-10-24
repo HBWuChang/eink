@@ -40,6 +40,7 @@ class _YtStatusPageState extends State<YtStatusPage> {
       'text_position',
       'warning_hours',
       'timezone',
+      'work_hours',
     ]) {
       fields[key]!.addListener(schedulePreview);
     }
@@ -106,6 +107,9 @@ class _YtStatusPageState extends State<YtStatusPage> {
         local.toString().substring(0, 16),
         rotation: config.number('text_rotation'),
         position: config.text('text_position'),
+        clockLabel: controller.clockLabel(config, now),
+        clockMetrics:
+            controller.clockData.value?.metrics ?? 'WK:-- ALL:-- S:--',
       );
       if (!mounted || version != previewVersion) return;
       final png = packedYtPreview(packed);
@@ -162,13 +166,16 @@ class _YtStatusPageState extends State<YtStatusPage> {
           ),
         ),
         for (final key in YtConfig.defaults.keys.where(
-          (key) => key != 'text_rotation' && key != 'text_position',
+          (key) =>
+              key != 'text_rotation' &&
+              key != 'text_position' &&
+              key != 'work_hours',
         ))
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: TextField(
               controller: fields[key],
-              obscureText: key == 'token',
+              obscureText: key == 'token' || key == 'clock_token',
               autocorrect: false,
               enableSuggestions: false,
               decoration: InputDecoration(
@@ -214,6 +221,35 @@ class _YtStatusPageState extends State<YtStatusPage> {
           onChanged: (value) {
             if (value != null) fields['text_position']!.text = value;
           },
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          key: ValueKey('work-hours-${fields['work_hours']!.text}'),
+          initialValue: ['9', '12'].contains(fields['work_hours']!.text)
+              ? fields['work_hours']!.text
+              : null,
+          decoration: const InputDecoration(
+            labelText: '工作时长',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final hours in [9, 12])
+              DropdownMenuItem(value: '$hours', child: Text('$hours 小时')),
+          ],
+          onChanged: (value) {
+            if (value != null) fields['work_hours']!.text = value;
+          },
+        ),
+        TextButton(
+          onPressed: () => action(() async {
+            final imported = await controller.importClockConfig();
+            if (imported != null) {
+              for (final entry in imported.entries) {
+                fields[entry.key]!.text = '${entry.value}';
+              }
+            }
+          }),
+          child: const Text('导入 clockOut 配置（ClockViewModel.swift）'),
         ),
         const SizedBox(height: 16),
         Card(

@@ -21,6 +21,9 @@ class YtConfig {
     'warning_hours': 24,
     'text_rotation': 0,
     'text_position': 'bottom_center',
+    'work_hours': 12,
+    'clock_url': '',
+    'clock_token': '',
   };
   String text(String key) => values[key].toString().trim();
   int number(String key) => int.parse(text(key));
@@ -36,6 +39,9 @@ class YtConfig {
     'bottom_right': '右下',
   };
   void validate() {
+    if (![9, 12].contains(number('work_hours'))) {
+      throw const FormatException('工作时长请选择 9 或 12 小时');
+    }
     if (![0, 90, 180, 270].contains(number('text_rotation')) ||
         !positions.containsKey(text('text_position'))) {
       throw const FormatException('请选择四个方向和九个位置之一');
@@ -240,6 +246,8 @@ Future<Uint8List> overlayYt(
   String timestamp, {
   int rotation = 0,
   String position = 'bottom_center',
+  String clockLabel = '下班：未配置',
+  String clockMetrics = 'WK:-- ALL:-- S:--',
 }) async {
   if (base.length != BleProtocol.imageBytes) {
     throw const FormatException('底图数据长度错误');
@@ -285,6 +293,8 @@ Future<Uint8List> overlayYt(
     text(row.text, 40, 82 + i * 52.0, deadlineColor(row.colorIndex));
   }
   text('更新：$timestamp', 16, 244, const ui.Color(0xFF000000));
+  text(clockLabel, 40, 274, const ui.Color(0xFF000000));
+  text(clockMetrics, 24, 326, const ui.Color(0xFF000000));
 
   late img.Image panel;
   Uint8List? nativePng;
@@ -332,7 +342,7 @@ Future<Uint8List> overlayYt(
 
     final picture = recorder.endRecording();
     final raster = await picture
-        .toImage(480, 264)
+        .toImage(480, 360)
         .timeout(const Duration(seconds: 20));
     try {
       final rgba = await raster.toByteData(
@@ -341,7 +351,7 @@ Future<Uint8List> overlayYt(
       if (rgba == null) throw StateError('文字图像生成失败');
       panel = img.Image.fromBytes(
         width: 480,
-        height: 264,
+        height: 360,
         bytes: rgba.buffer,
         bytesOffset: rgba.offsetInBytes,
         numChannels: 4,
