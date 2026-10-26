@@ -43,12 +43,19 @@ void main() {
       await tester.pumpWidget(const GetMaterialApp(home: HomePage()));
       await tester.pump();
       expect(tester.takeException(), isNull);
-      expect(find.byType(Radio<DitherAlgorithm>), findsNWidgets(4));
+      expect(find.byType(Radio<DitherAlgorithm>), findsNWidgets(5));
       final group = tester.widget<RadioGroup<DitherAlgorithm>>(
         find.byType(RadioGroup<DitherAlgorithm>),
       );
       expect(group.groupValue, DitherAlgorithm.none);
       // The entire labelled option is clickable.
+      await tester.ensureVisible(find.text('蓝噪声'));
+      await tester.tap(find.text('蓝噪声'));
+      await tester.pump();
+      expect(
+        Get.find<ImageController>().ditherAlgorithm.value,
+        DitherAlgorithm.blueNoise,
+      );
       await tester.ensureVisible(find.text('JJN'));
       await tester.tap(find.text('JJN'));
       await tester.pump();

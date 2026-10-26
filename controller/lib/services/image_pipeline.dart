@@ -2,6 +2,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 
 import 'ble_protocol.dart';
@@ -10,7 +11,8 @@ enum DitherAlgorithm {
   none('不使用抖动'),
   fs('FS'),
   jjn('JJN'),
-  stucki('Stucki');
+  stucki('Stucki'),
+  blueNoise('蓝噪声');
 
   const DitherAlgorithm(this.label);
   final String label;
@@ -69,7 +71,16 @@ RenderResult renderImageSync({
   required int cropAngle,
   required int blankColor,
   required DitherAlgorithm algorithm,
+  Uint8List? blueNoiseThresholds,
 }) {
+  if (algorithm == DitherAlgorithm.blueNoise &&
+      blueNoiseThresholds?.length !=
+          BleProtocol.imageWidth * BleProtocol.imageHeight * 2) {
+    throw ArgumentError('蓝噪声需要完整的 768×552 阈值数据');
+  }
+  final thresholds = blueNoiseThresholds == null
+      ? null
+      : ByteData.sublistView(blueNoiseThresholds);
   img.Image? decoded = img.decodeImage(sourceBytes);
   if (decoded == null) {
     throw const FormatException('无法解码图片');
@@ -119,7 +130,8 @@ RenderResult renderImageSync({
   final preview = img.Image(width: targetW, height: targetH, numChannels: 3);
 
   final kernel = switch (algorithm) {
-    DitherAlgorithm.none => const <(int, int, int)>[],
+    DitherAlgorithm.none ||
+    DitherAlgorithm.blueNoise => const <(int, int, int)>[],
     DitherAlgorithm.fs => _fs,
     DitherAlgorithm.jjn => _jjn,
     DitherAlgorithm.stucki => _stucki,
@@ -158,6 +170,17 @@ RenderResult renderImageSync({
         }
       }
 
+      if (algorithm == DitherAlgorithm.blueNoise) {
+        final threshold =
+            (thresholds!.getUint16(2 * (y * targetW + x), Endian.big) + 0.5) /
+            65536;
+        best = _blueNoiseIndex(
+          p.r.toInt(),
+          p.g.toInt(),
+          p.b.toInt(),
+          threshold,
+        );
+      }
       final c = palette[best];
       for (final (dx, dy, weight) in kernel) {
         final nx = x + dx;
@@ -193,6 +216,49 @@ RenderResult renderImageSync({
   );
 }
 
+// Match the existing display palette, but mix in linear RGB so the spatial
+// average approximates light rather than gamma-encoded channel values.
+final _linearChannel = List<double>.generate(256, (i) {
+  final v = i / 255;
+  return v <= 0.04045
+      ? v / 12.92
+      : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+});
+final _linearPalette = [
+  [0, 0, 0],
+  [255, 255, 255],
+  [245, 205, 0],
+  [200, 0, 0],
+].map((c) => c.map((v) => _linearChannel[v]).toList()).toList();
+
+/// Choose the closest two-color mixture among all six palette pairs.
+/// A fixed mask makes repeated renders deterministic without diffusing errors.
+int _blueNoiseIndex(int r, int g, int b, double threshold) {
+  final cr = _linearChannel[r], cg = _linearChannel[g], cb = _linearChannel[b];
+  var bestDistance = double.infinity;
+  var selected = 0;
+  for (var a = 0; a < 4; a++) {
+    final ca = _linearPalette[a];
+    for (var b = a + 1; b < 4; b++) {
+      final other = _linearPalette[b];
+      final dr = other[0] - ca[0], dg = other[1] - ca[1], db = other[2] - ca[2];
+      final t =
+          (((cr - ca[0]) * dr + (cg - ca[1]) * dg + (cb - ca[2]) * db) /
+                  (dr * dr + dg * dg + db * db))
+              .clamp(0.0, 1.0);
+      final er = cr - ca[0] - t * dr,
+          eg = cg - ca[1] - t * dg,
+          eb = cb - ca[2] - t * db;
+      final distance = er * er + eg * eg + eb * eb;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        selected = threshold < t ? b : a;
+      }
+    }
+  }
+  return selected;
+}
+
 double _clamp(double value) {
   if (value < 0) return 0;
   if (value > 255) return 255;
@@ -209,7 +275,12 @@ Future<RenderResult> renderImage({
   required int cropAngle,
   required int blankColor,
   required DitherAlgorithm algorithm,
-}) {
+}) async {
+  final thresholds = algorithm == DitherAlgorithm.blueNoise
+      ? (await rootBundle.load(
+          'assets/dither/blue_noise_768x552.u16be',
+        )).buffer.asUint8List()
+      : null;
   return Isolate.run(
     () => renderImageSync(
       sourceBytes: sourceBytes,
@@ -221,6 +292,7 @@ Future<RenderResult> renderImage({
       cropAngle: cropAngle,
       blankColor: blankColor,
       algorithm: algorithm,
+      blueNoiseThresholds: thresholds,
     ),
   );
 }

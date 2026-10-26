@@ -292,9 +292,10 @@ Future<Uint8List> overlayYt(
     final row = deadlines[i];
     text(row.text, 40, 82 + i * 52.0, deadlineColor(row.colorIndex));
   }
-  text('更新：$timestamp', 16, 244, const ui.Color(0xFF000000));
-  text(clockLabel, 40, 274, const ui.Color(0xFF000000));
-  text(clockMetrics, 24, 326, const ui.Color(0xFF000000));
+  final redu = -(3 - deadlines.length) * 52.0;
+  text('更新：$timestamp', 16, 244 + redu, const ui.Color(0xFF000000));
+  text(clockLabel, 40, 274 + redu, const ui.Color(0xFF000000));
+  text(clockMetrics, 24, 326 + redu, const ui.Color(0xFF000000));
 
   late img.Image panel;
   Uint8List? nativePng;

@@ -1,9 +1,15 @@
+import 'dart:io';
+
 import 'package:controller/services/ble_protocol.dart';
 import 'package:controller/services/image_pipeline.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  final blueNoiseThresholds = File(
+    'assets/dither/blue_noise_768x552.u16be',
+  ).readAsBytesSync();
   test('renders 768x552 packed image for an in-bounds crop', () {
     final source = createTestPatternPng();
     final result = renderImageSync(
@@ -89,7 +95,7 @@ void main() {
     expect(preview.height, BleProtocol.imageHeight);
   });
 
-  test('all diffusion modes produce distinct valid packed previews', () {
+  test('all quantization modes produce distinct valid packed previews', () {
     final source = img.Image(width: 768, height: 552, numChannels: 3);
     img.fill(source, color: img.ColorRgb8(128, 128, 128));
     final bytes = img.encodePng(source);
@@ -106,6 +112,7 @@ void main() {
         cropAngle: 0,
         blankColor: 0xFFFFFF,
         algorithm: algorithm,
+        blueNoiseThresholds: blueNoiseThresholds,
       );
       expect(result.packed.length, BleProtocol.imageBytes);
       final preview = img.decodePng(result.previewPng)!;
@@ -133,6 +140,68 @@ void main() {
         expect(result.packed, isNot(orderedEquals(previous)));
       }
       outputs.add(result.packed);
+    }
+  });
+
+  test(
+    'blue noise loads its asset in an isolate and preserves gray coverage',
+    () async {
+      final source = img.Image(width: 768, height: 552, numChannels: 3);
+      img.fill(source, color: img.ColorRgb8(128, 128, 128));
+      Future<RenderResult> render() => renderImage(
+        sourceBytes: img.encodePng(source),
+        rotation: 0,
+        cropLeft: 0,
+        cropTop: 0,
+        cropRight: 1,
+        cropBottom: 1,
+        cropAngle: 0,
+        blankColor: 0xFFFFFF,
+        algorithm: DitherAlgorithm.blueNoise,
+      );
+      final result = await render();
+      final repeat = await render();
+      expect(result.packed, orderedEquals(repeat.packed));
+      var white = 0;
+      for (final byte in result.packed) {
+        for (var shift = 0; shift <= 6; shift += 2) {
+          final index = (byte >> shift) & 3;
+          expect(index, anyOf(0, 1));
+          if (index == 1) white++;
+        }
+      }
+      // sRGB 128 corresponds to ~21.586% linear-light white coverage.
+      expect(white / (768 * 552), closeTo(0.21586, 0.00002));
+    },
+  );
+
+  test('blue noise preserves exact palette colors', () {
+    const palette = [(0, 0, 0), (255, 255, 255), (245, 205, 0), (200, 0, 0)];
+    final source = img.Image(width: 768, height: 552, numChannels: 3);
+    for (var y = 0; y < 552; y++) {
+      for (var x = 0; x < 768; x++) {
+        final c = palette[x ~/ 192];
+        source.setPixelRgb(x, y, c.$1, c.$2, c.$3);
+      }
+    }
+    final result = renderImageSync(
+      sourceBytes: img.encodePng(source),
+      rotation: 0,
+      cropLeft: 0,
+      cropTop: 0,
+      cropRight: 1,
+      cropBottom: 1,
+      cropAngle: 0,
+      blankColor: 0xFFFFFF,
+      algorithm: DitherAlgorithm.blueNoise,
+      blueNoiseThresholds: blueNoiseThresholds,
+    );
+    for (var y = 0; y < 552; y++) {
+      for (var x = 0; x < 768; x++) {
+        final index =
+            (result.packed[y * 192 + (x >> 2)] >> (6 - 2 * (x & 3))) & 3;
+        expect(index, x ~/ 192);
+      }
     }
   });
 
